@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>庫存管理</title>
+<style>
+html{width:100%;height:100%}
+*{box-sizing:border-box;margin:0;padding:0}
+/* 強制撐滿 Apps Script iframe */
+body{
+  font-family:'PingFang TC','Microsoft JhengHei',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-width:100vw;min-height:100vh;
+  position:fixed;inset:0;overflow-y:auto;
+}
+:root{
+  --sage:#6B9A7A;--sage-l:#C2D9C9;--sage-p:#EAF1EC;
+  --rose:#A0604A;--rose-l:#D4A898;--rose-p:#F4EAE6;
+  --slate:#5A7A96;--slate-l:#A8C0D2;--slate-p:#E2ECF4;
+  --mauve:#7A6A8A;--mauve-l:#BEB2CA;--mauve-p:#EDE8F2;
+  --ochre:#8A7040;--ochre-l:#C8B280;--ochre-p:#F0E8D8;
+  --steel:#5A7478;--steel-l:#A2BEC0;--steel-p:#E2ECEE;
+  --sprg:#5A8060;--sprg-l:#A2C2A8;--sprg-p:#E4F0E6;
+  --brn:#6A5A48;--brn-l:#B8A898;--brn-p:#EDE8E0;
+  --bg:#F2EDE8;--card:#FAFAF7;--text:#1E1C18;--textm:#3C3830;--texts:#6A6458;
+  --bdr:rgba(60,56,48,0.16);--radius:14px
+}
+body{font-family:'PingFang TC','Microsoft JhengHei',sans-serif;background:var(--bg);color:var(--text)}
+.app{max-width:390px;margin:0 auto;display:flex;flex-direction:column;min-height:100vh;position:relative}
+.hdr{background:#E8E0D6;border-bottom:1.5px solid var(--bdr);padding:12px 14px 10px;position:sticky;top:0;z-index:50}
+.hdr-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.app-title{font-size:17px;font-weight:700;color:#1E1C18}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#CCC;margin-left:6px;display:inline-block}
+.sync-dot.ok{background:var(--sage)}
+.sync-dot.err{background:var(--rose)}
+.sync-dot.busy{background:var(--ochre);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.calc-fab{background:var(--rose);color:#fff;border:none;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px}
+.badge{background:#fff;color:var(--rose);border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tab{flex:1;padding:9px 0;text-align:center;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid var(--bdr);background:#F5EFE8;color:#4A4438;transition:all .2s}
+.tab.active{background:#1E1C18;color:#F5EFE8;border-color:#1E1C18}
+.fbar{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.fbar::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;padding:5px 11px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid;transition:all .2s;white-space:nowrap}
+.loading-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:500}
+.spinner{width:32px;height:32px;border:3px solid var(--bdr);border-top-color:var(--sage);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#1E1C18;color:#F5EFE8;font-size:11px;font-weight:600;padding:7px 16px;border-radius:20px;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+
+/* ── 庫存查詢 ── */
+.qpage{padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.qrow{background:var(--card);border-radius:10px;border:1px solid var(--bdr);display:flex;align-items:center;gap:10px;padding:10px 12px}
+.qrow.t-五金{border-left:4px solid var(--slate)}
+.qrow.t-面盆{border-left:4px solid var(--ochre)}
+.qrow.t-龍頭{border-left:4px solid var(--rose)}
+.qrow.t-馬桶{border-left:4px solid var(--mauve)}
+.qrow.t-浴櫃鏡{border-left:4px solid var(--steel)}
+.qrow.t-手噴{border-left:4px solid var(--sprg)}
+.qrow.t-其他{border-left:4px solid var(--brn)}
+.qrow-left{flex:1;min-width:0}
+.qrow-name{font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px}
+.qrow-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px}
+.qbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px}
+.qrow-size{font-size:11px;color:var(--texts)}
+.qrow-prices{font-size:11px;color:var(--textm)}
+.qrow-prices strong{color:var(--text);font-weight:700}
+.qrow-upd{font-size:10px;color:var(--texts);margin-top:2px}
+.qrow-stocks{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0;min-width:44px}
+.qs-lbl{font-size:9px;color:var(--texts);font-weight:500;text-align:right}
+.qs-val{font-size:20px;font-weight:800;line-height:1.1;color:var(--rose);text-align:right}
+/* 單位標籤貼在數字右下 */
+.qs-unit{font-size:10px;font-weight:600;color:var(--rose);text-align:right;line-height:1;margin-top:1px}
+.qrow-add{width:38px;height:38px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;cursor:pointer;flex-shrink:0;transition:transform .15s,background .2s;background:var(--sage)}
+.qrow-add:active{transform:scale(0.9)}
+.qrow-add.on{background:var(--rose)}
+
+/* ── 修改庫存 ── */
+.epage{display:none;flex-direction:column}
+.epage.open{display:flex}
+.elist{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1}
+.pcard{border-radius:var(--radius);background:var(--card);border:1px solid var(--bdr);display:flex}
+.pcard.t-五金{border-left:4px solid var(--slate)}
+.pcard.t-面盆{border-left:4px solid var(--ochre)}
+.pcard.t-龍頭{border-left:4px solid var(--rose)}
+.pcard.t-馬桶{border-left:4px solid var(--mauve)}
+.pcard.t-浴櫃鏡{border-left:4px solid var(--steel)}
+.pcard.t-手噴{border-left:4px solid var(--sprg)}
+.pcard.t-其他{border-left:4px solid var(--brn)}
+.card-body{flex:1;padding:12px 10px 12px 12px;min-width:0}
+.card-edit-col{width:52px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-left:1px solid var(--bdr);background:#F5F0EA;border-radius:0 var(--radius) var(--radius) 0;padding:10px 0}
+.edit-btn-sm{width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .15s}
+.edit-btn-sm:active{transform:scale(0.9)}
+.edit-btn-sm.e{background:var(--sage);color:#fff}
+.edit-btn-sm.d{background:var(--rose-p);color:var(--rose);border:1.5px solid var(--rose-l)}
+.ctop{display:flex;gap:10px;margin-bottom:10px}
+.photo-stack{position:relative;flex-shrink:0;width:72px;height:72px;cursor:pointer}
+.p-main{width:72px;height:72px;border-radius:9px;background:#E4DED6;border:1px solid var(--bdr);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.p-main img{width:100%;height:100%;object-fit:cover}
+.p2-badge{position:absolute;bottom:3px;right:3px;background:#1E1C18;color:#fff;font-size:9px;border-radius:5px;padding:2px 5px;font-weight:700;line-height:1}
+.cinfo{flex:1;min-width:0}
+.cname{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1.3}
+.cbadge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-bottom:4px}
+.csize{font-size:11px;color:var(--texts);margin-bottom:3px}
+.ccopy{font-size:11px;color:var(--textm);line-height:1.5;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.cstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}
+.stat{background:var(--bg);border-radius:7px;padding:6px;text-align:center}
+.slbl{font-size:9px;color:var(--texts);margin-bottom:2px;font-weight:500}
+.sval{font-size:15px;font-weight:800;color:var(--text);line-height:1.2}
+.sval.red{color:var(--rose)}
+.sval.grn{color:var(--sage)}
+/* 單位小字顯示在數值下方 */
+.sunit{font-size:9px;font-weight:600;color:var(--texts);line-height:1;margin-top:1px}
+.sunit.red{color:var(--rose)}
+.cprice{display:flex;gap:8px;font-size:12px;color:var(--textm);margin-bottom:4px}
+.cprice strong{color:var(--text);font-weight:700}
+.upd{font-size:10px;color:var(--texts)}
+.efoot{background:#E8E0D6;border-top:1.5px solid var(--bdr);padding:12px 14px;display:flex;gap:8px;position:sticky;bottom:0}
+.addnew{flex:1;background:#1E1C18;color:#F5EFE8;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+.expbtn{background:var(--slate-p);color:var(--slate);border:1.5px solid var(--slate-l);border-radius:10px;padding:12px 14px;font-size:13px;font-weight:700;cursor:pointer}
+
+/* ── 試算頁 ── */
+.cpage{display:none;flex-direction:column;min-height:100vh}
+.cpage.open{display:flex}
+.cphdr{background:#E8E0D6;border-bottom:1.5px solid var(--bdr);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0}
+.cphdr-t{font-size:16px;font-weight:700;color:var(--text)}
+.backbtn{background:transparent;border:1.5px solid var(--bdr);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--textm);cursor:pointer}
+.clist{padding:12px 14px;display:flex;flex-direction:column;gap:8px;flex:1}
+.ccrd{background:var(--card);border-radius:10px;border:1px solid var(--bdr);padding:10px;display:flex;align-items:center;gap:10px}
+.cthumb{width:50px;height:50px;border-radius:7px;background:#E4DED6;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px;color:#CCC}
+.cthumb img{width:100%;height:100%;object-fit:cover}
+.ccinfo{flex:1;min-width:0}
+.ccname{font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px}
+.ccstk{font-size:11px;color:var(--texts)}
+.ccprc{font-size:11px;color:var(--textm);margin-top:2px}
+.rmbtn{width:32px;height:32px;border-radius:50%;background:var(--rose-p);border:1.5px solid var(--rose-l);color:var(--rose);font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:400;flex-shrink:0}
+.cempty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 20px;color:var(--texts);font-size:13px;gap:10px;text-align:center}
+.cfooter{background:#E8E0D6;border-top:1.5px solid var(--bdr);padding:14px 16px;position:sticky;bottom:0}
+.ctrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.ctlbl{font-size:12px;color:var(--texts);font-weight:500}
+.ctval{font-size:15px;font-weight:800;color:var(--text)}
+.minbox{margin-top:10px;background:var(--rose-p);border-radius:10px;padding:10px 14px;border:1.5px solid var(--rose-l)}
+.minrow{display:flex;align-items:baseline;gap:5px}
+.mintxt{font-size:14px;color:var(--textm);font-weight:600}
+.minnum{font-size:26px;font-weight:800;color:var(--rose)}
+
+/* ── 編輯 Sheet ── */
+.sh-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;align-items:flex-end;justify-content:center}
+.sh-ov.open{display:flex}
+.sheet{background:#fff;border-radius:18px 18px 0 0;width:100%;max-width:390px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column}
+.shandle{width:40px;height:4px;background:#CCC;border-radius:2px;margin:12px auto 6px;flex-shrink:0}
+.stitle{font-size:15px;font-weight:700;padding:0 16px 12px;border-bottom:1px solid var(--bdr);flex-shrink:0;color:var(--text)}
+.sbody{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.sfoot{padding:12px 16px 24px;border-top:1px solid var(--bdr);flex-shrink:0;display:flex;gap:8px}
+.ssave{flex:1;background:#1E1C18;color:#F5EFE8;border:none;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+.ssave:disabled{opacity:.5;cursor:default}
+.scancel{background:transparent;color:var(--texts);border:1.5px solid var(--bdr);border-radius:10px;padding:12px 14px;font-size:13px;cursor:pointer;font-weight:600}
+.flbl{font-size:11px;color:var(--texts);font-weight:600;margin-bottom:3px}
+.finp{padding:8px 10px;border:1.5px solid var(--bdr);border-radius:8px;font-size:13px;background:#fff;color:var(--text);width:100%;font-family:inherit}
+.finp:disabled{background:var(--bg);color:var(--texts)}
+.finp:focus{outline:none;border-color:var(--sage)}
+textarea.finp{resize:vertical;min-height:58px;max-height:90px}
+.frow2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.trow{display:flex;flex-wrap:wrap;gap:5px}
+.tchip{padding:5px 11px;border-radius:12px;font-size:11px;cursor:pointer;border:1.5px solid;font-weight:700;background:transparent;transition:all .15s}
+
+/* 庫存 + 單位 同一行 */
+.stock-unit-row{display:flex;gap:8px;align-items:flex-end}
+.stock-unit-row .finp{flex:1}
+/* 單位選擇器 */
+.unit-selector{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.uchip{padding:4px 10px;border-radius:10px;font-size:11px;cursor:pointer;border:1.5px solid var(--bdr);font-weight:600;background:transparent;color:var(--texts);transition:all .15s;white-space:nowrap}
+.uchip.sel{background:#1E1C18;color:#F5EFE8;border-color:#1E1C18}
+.unit-custom{flex:1;min-width:60px;max-width:80px;padding:5px 8px;border:1.5px solid var(--bdr);border-radius:10px;font-size:11px;font-family:inherit;color:var(--text);background:#fff;text-align:center}
+.unit-custom:focus{outline:none;border-color:var(--sage)}
+.unit-custom::placeholder{color:#CCC}
+
+.dim-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.dim-item{display:flex;flex-direction:column;gap:3px}
+.dim-lbl{font-size:11px;font-weight:700;color:var(--texts);display:flex;align-items:center;gap:3px}
+.dim-unit{font-size:10px;color:#AAA;font-weight:400}
+.dim-inp{padding:7px 8px;border:1.5px solid var(--bdr);border-radius:8px;font-size:13px;background:#fff;color:var(--text);width:100%;font-family:inherit;text-align:center}
+.dim-inp:focus{outline:none;border-color:var(--sage)}
+.dim-inp::placeholder{color:#CCC}
+
+/* 照片 */
+.puprow{display:flex;gap:10px}
+.pbox-filled{width:72px;height:72px;border-radius:9px;border:1px solid var(--bdr);position:relative;overflow:hidden;flex-shrink:0;cursor:pointer}
+.pbox-filled img{width:100%;height:100%;object-fit:cover;display:block}
+.pbox-replace{position:absolute;inset:0;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s}
+.pbox-filled:hover .pbox-replace,.pbox-filled:active .pbox-replace{opacity:1;background:rgba(0,0,0,0.45)}
+.pbox-replace span{color:#fff;font-size:10px;font-weight:700;text-align:center;line-height:1.3;padding:4px}
+.pbox-empty{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0}
+.pbox-placeholder{width:72px;height:72px;border-radius:9px;border:1.5px dashed var(--bdr);background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:28px;color:#CCC}
+.pbox-btns{display:flex;gap:5px}
+.pbox-btn{padding:5px 8px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid;white-space:nowrap;transition:all .15s}
+.pbox-btn.camera{background:var(--sage-p);color:var(--sage);border-color:var(--sage-l)}
+.pbox-btn.album{background:var(--slate-p);color:var(--slate);border-color:var(--slate-l)}
+.pbox-btn:active{transform:scale(0.95)}
+.pbox-uploading{width:72px;height:72px;border-radius:9px;border:1px solid var(--bdr);background:#E4DED6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;flex-shrink:0}
+.upload-spinner{width:20px;height:20px;border:2px solid rgba(107,154,122,0.3);border-top-color:var(--sage);border-radius:50%;animation:spin .7s linear infinite}
+.upload-lbl{font-size:9px;color:var(--texts);font-weight:600}
+
+/* 照片 lightbox */
+.ph-ov{display:none;position:fixed;inset:0;background:rgba(10,8,6,0.92);z-index:200;flex-direction:column;align-items:center;justify-content:center}
+.ph-ov.open{display:flex}
+.ph-inner{width:320px;overflow:hidden}
+.ph-track{display:flex;transition:transform .28s cubic-bezier(.4,0,.2,1)}
+.ph-slide{width:320px;height:300px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0 10px}
+.ph-slide img{max-width:100%;max-height:100%;border-radius:10px;object-fit:contain;display:block}
+.ph-close{position:absolute;top:18px;right:18px;background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:700;z-index:5}
+.ph-dots{display:flex;gap:8px;margin-top:14px}
+.ph-dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.3);border:none;cursor:pointer;padding:0}
+.ph-dot.on{background:#fff}
+.ph-arrows{display:flex;gap:16px;margin-top:12px}
+.ph-arr{background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;padding:8px 18px;font-size:14px;cursor:pointer;font-weight:600}
+.ph-arr:disabled{opacity:.3;cursor:default}
+.ph-counter{color:rgba(255,255,255,0.5);font-size:12px;margin-top:8px}
+
+/* 匯出 */
+.exp-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:300;align-items:center;justify-content:center}
+.exp-ov.open{display:flex}
+.expbox{background:#fff;border-radius:16px;padding:20px;margin:0 16px;width:100%;max-width:340px}
+.exptbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px}
+.exptbl th{background:var(--bg);padding:7px 8px;text-align:left;font-weight:700;border-bottom:1px solid var(--bdr);color:var(--text)}
+.exptbl td{padding:7px 8px;border-bottom:1px solid var(--bdr);color:var(--textm)}
+.expbtns{display:flex;gap:8px}
+.expcopy{flex:1;background:#1E1C18;color:#F5EFE8;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-weight:700}
+.expcl{background:var(--bg);color:var(--textm);border:1px solid var(--bdr);border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;font-weight:600}
+.no-res{text-align:center;padding:40px 20px;color:var(--texts);font-size:13px}
+</style>
+</head>
+<body>
+
+<script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbwP137CRyuky6Vc653J6lxUSw_uyPlobrJ2sn_Vs8kmpBcx-ArnE-A92ttgstyJqNE/exec';
+const UNITS   = ['個','組','套','件','支','片','條','台'];
+</script>
+
+<div class="loading-screen" id="loadingScreen">
+  <div class="spinner"></div>
+  <div style="font-size:13px;color:#6A6458;font-weight:500">載入資料中…</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="app" id="app" style="display:none">
+  <div class="hdr">
+    <div class="hdr-top">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="app-title">📦 庫存管理</div>
+        <span class="sync-dot busy" id="syncDot"></span>
+      </div>
+      <button class="calc-fab" onclick="showCalc()">🧮 試算 <span class="badge" id="badge">0</span></button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" id="tab0" onclick="switchTab('query',0)">庫存查詢</button>
+      <button class="tab" id="tab1" onclick="switchTab('edit',1)">修改庫存</button>
+    </div>
+    <div class="fbar">
+      <div class="chip" style="background:#1E1C18;color:#F5EFE8;border-color:#1E1C18" data-f="all" onclick="doFilter('all',this)">全部</div>
+      <div class="chip" style="background:transparent;color:var(--slate);border-color:var(--slate-l)" data-f="五金" onclick="doFilter('五金',this)">五金</div>
+      <div class="chip" style="background:transparent;color:var(--ochre);border-color:var(--ochre-l)" data-f="面盆" onclick="doFilter('面盆',this)">面盆</div>
+      <div class="chip" style="background:transparent;color:var(--rose);border-color:var(--rose-l)" data-f="龍頭" onclick="doFilter('龍頭',this)">龍頭</div>
+      <div class="chip" style="background:transparent;color:var(--mauve);border-color:var(--mauve-l)" data-f="馬桶" onclick="doFilter('馬桶',this)">馬桶</div>
+      <div class="chip" style="background:transparent;color:var(--steel);border-color:var(--steel-l)" data-f="浴櫃鏡" onclick="doFilter('浴櫃鏡',this)">浴櫃鏡</div>
+      <div class="chip" style="background:transparent;color:var(--sprg);border-color:var(--sprg-l)" data-f="手噴" onclick="doFilter('手噴',this)">手噴</div>
+      <div class="chip" style="background:transparent;color:var(--brn);border-color:var(--brn-l)" data-f="其他" onclick="doFilter('其他',this)">其他</div>
+    </div>
+  </div>
+
+  <div class="qpage" id="qpage"></div>
+
+  <div class="epage" id="epage">
+    <div class="elist" id="elist"></div>
+    <div class="efoot">
+      <button class="addnew" onclick="openSheet(null)">＋ 新增產品</button>
+      <button class="expbtn" onclick="showExport()">匯出</button>
+    </div>
+  </div>
+
+  <div class="cpage" id="cpage">
+    <div class="cphdr">
+      <div class="cphdr-t">🧮 組合價試算</div>
+      <button class="backbtn" onclick="hideCalc()">← 返回</button>
+    </div>
+    <div class="clist" id="clist"></div>
+    <div class="cfooter" id="cfooter"></div>
+  </div>
+</div>
+
+<!-- 隱藏 file inputs -->
+<input type="file" id="inp-camera-0" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(0,this)">
+<input type="file" id="inp-camera-1" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(1,this)">
+<input type="file" id="inp-album-0"  accept="image/*" style="display:none" onchange="handlePhoto(0,this)">
+<input type="file" id="inp-album-1"  accept="image/*" style="display:none" onchange="handlePhoto(1,this)">
+<input type="file" id="inp-replace-0" accept="image/*" style="display:none" onchange="handlePhoto(0,this)">
+<input type="file" id="inp-replace-1" accept="image/*" style="display:none" onchange="handlePhoto(1,this)">
+
+<div class="ph-ov" id="phOv">
+  <button class="ph-close" onclick="closePh()">✕</button>
+  <div class="ph-inner" id="phInner"><div class="ph-track" id="phTrack"></div></div>
+  <div class="ph-dots" id="phDots"></div>
+  <div class="ph-arrows">
+    <button class="ph-arr" id="phPrev" onclick="phGo(-1)">← 上一張</button>
+    <button class="ph-arr" id="phNext" onclick="phGo(1)">下一張 →</button>
+  </div>
+  <div class="ph-counter" id="phCounter"></div>
+</div>
+
+<div class="sh-ov" id="shOv">
+  <div class="sheet">
+    <div class="shandle"></div>
+    <div class="stitle" id="stitle">新增產品</div>
+    <div class="sbody" id="sbody"></div>
+    <div class="sfoot">
+      <button class="scancel" onclick="closeSheet()">取消</button>
+      <button class="ssave" id="ssave" onclick="saveSheet()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div class="exp-ov" id="expOv">
+  <div class="expbox">
+    <div style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--text)">📋 匯出本月庫存</div>
+    <div style="font-size:11px;color:var(--texts);margin-bottom:12px" id="expMonth"></div>
+    <table class="exptbl">
+      <thead><tr><th>產品名稱</th><th>本月庫存</th><th>單位</th></tr></thead>
+      <tbody id="exptbody"></tbody>
+    </table>
+    <div class="expbtns">
+      <button class="expcopy" onclick="doCopy()">複製 → 貼至試算表</button>
+      <button class="expcl" onclick="document.getElementById('expOv').classList.remove('open')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TC={
+  '五金':['var(--slate-p)','var(--slate)'],
+  '面盆':['var(--ochre-p)','var(--ochre)'],
+  '龍頭':['var(--rose-p)','var(--rose)'],
+  '馬桶':['var(--mauve-p)','var(--mauve)'],
+  '浴櫃鏡':['var(--steel-p)','var(--steel)'],
+  '手噴':['var(--sprg-p)','var(--sprg)'],
+  '其他':['var(--brn-p)','var(--brn)']
+};
+const TKEYS=['五金','面盆','龍頭','馬桶','浴櫃鏡','手噴','其他'];
+const TVARS=['slate','ochre','rose','mauve','steel','sprg','brn'];
+
+let prods=[],cart=[],filt='all',tab='query',eid=null,sPhotos=[null,null];
+let phPhotos=[],phIdx=0,phTouchX=0;
+
+/* ── API（google.script.run 方式，無 CORS 問題）── */
+function setSyncDot(s){document.getElementById('syncDot').className='sync-dot '+s;}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+
+function gsRun(fnName, ...args){
+  return new Promise((resolve, reject)=>{
+    let runner = google.script.run
+      .withSuccessHandler(result=>{
+        try{ resolve(JSON.parse(result)); }
+        catch(e){ resolve(result); }
+      })
+      .withFailureHandler(err=>reject(err));
+    runner[fnName](...args);
+  });
+}
+
+async function apiGetProducts(){ return gsRun('clientGetProducts'); }
+async function apiSaveProduct(product){ return gsRun('clientSaveProduct', JSON.stringify(product)); }
+async function apiDeleteProduct(id){ return gsRun('clientDeleteProduct', id); }
+async function apiUploadPhoto(name, index, dataUrl){ return gsRun('clientUploadPhoto', name, index, dataUrl); }
+
+async function init(){
+  setSyncDot('busy');
+  try{const d=await apiGetProducts();prods=d.products||[];setSyncDot('ok');}
+  catch(e){setSyncDot('err');showToast('⚠️ 載入失敗，請重新整理');}
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('app').style.display='block';
+  switchTab('query',0);
+  doFilter('all',document.querySelector('.chip[data-f="all"]'));
+}
+
+/* ── 工具 ── */
+function fmt(n){return n!=null&&n!==''?Number(n).toLocaleString():'–';}
+function buildDim(w,h,d){const p=[];if(w)p.push('W'+w);if(h)p.push('H'+h);if(d)p.push('D'+d);return p.join('×');}
+function dimStr(p){return buildDim(p.sizeW,p.sizeH,p.sizeD);}
+function getList(){let r=[...prods];if(filt!=='all')r=r.filter(p=>p.type===filt);return r.sort((a,b)=>(b.upd||'').localeCompare(a.upd||''));}
+function getYMLabel(){const d=new Date();return`${d.getFullYear()}年${d.getMonth()+1}月`;}
+function u(p){return p.unit||'個';}  // 取單位，預設「個」
+
+/* ── 庫存查詢：單位顯示在數字右下 ── */
+function renderQ(){
+  const pg=document.getElementById('qpage');
+  const list=getList();
+  if(!list.length){pg.innerHTML='<div class="no-res">沒有符合條件的產品</div>';return;}
+  pg.innerHTML=list.map(p=>{
+    const[bg,tc]=TC[p.type]||TC['其他'];
+    const inc=cart.includes(p.id);
+    const ds=dimStr(p);
+    const unit=u(p);
+    return`<div class="qrow t-${p.type}">
+<div class="qrow-left">
+  <div class="qrow-name">${p.name}</div>
+  <div class="qrow-meta"><span class="qbadge" style="background:${bg};color:${tc}">${p.type}</span>${ds?`<span class="qrow-size">${ds} mm</span>`:''}</div>
+  <div class="qrow-prices">零售 <strong>$${fmt(p.retail)}</strong> ／ 商用 <strong>$${fmt(p.commercial)}</strong></div>
+  <div class="qrow-upd">更新 ${p.upd||'–'}</div>
+</div>
+<div class="qrow-stocks">
+  <div class="qs-lbl">本月庫存</div>
+  <div class="qs-val">${p.curStock??'–'}</div>
+  <div class="qs-unit">${unit}</div>
+</div>
+<button class="qrow-add${inc?' on':''}" onclick="toggleCart(${p.id})">${inc?'✓':'+'}</button>
+</div>`;
+  }).join('');
+}
+
+/* ── 修改庫存：上月/本月格都加單位小字 ── */
+function renderE(){
+  const el=document.getElementById('elist');
+  const list=getList();
+  if(!list.length){el.innerHTML='<div class="no-res">沒有符合條件的產品</div>';return;}
+  el.innerHTML=list.map(p=>{
+    const[bg,tc]=TC[p.type]||TC['其他'];
+    const ph2=(p.photos||[]).filter(Boolean).length;
+    const diff=p.curStock!=null&&p.lastStock!=null?p.curStock-p.lastStock:null;
+    const thumb=p.photos&&p.photos[0]?`<img src="${p.photos[0]}" alt="">`:`<span style="font-size:28px;color:#CCC">📷</span>`;
+    const ds=dimStr(p);
+    const unit=u(p);
+    return`<div class="pcard t-${p.type}">
+<div class="card-body">
+  <div class="ctop">
+    <div class="photo-stack" onclick="openPh(${p.id})"><div class="p-main">${thumb}</div>${ph2>0?`<div class="p2-badge">${ph2}張</div>`:''}</div>
+    <div class="cinfo">
+      <div class="cname">${p.name}</div>
+      <span class="cbadge" style="background:${bg};color:${tc}">${p.type}</span>
+      ${ds?`<div class="csize">📐 ${ds} mm</div>`:''}
+      ${p.copy?`<div class="ccopy">${p.copy}</div>`:''}
+    </div>
+  </div>
+  <div class="cstats">
+    <div class="stat">
+      <div class="slbl">上月庫存</div>
+      <div class="sval">${p.lastStock??'–'}</div>
+      <div class="sunit">${unit}</div>
+    </div>
+    <div class="stat">
+      <div class="slbl">本月庫存</div>
+      <div class="sval red">${p.curStock??'–'}</div>
+      <div class="sunit red">${unit}</div>
+    </div>
+    <div class="stat">
+      <div class="slbl">差異</div>
+      <div class="sval ${diff==null?'':(diff>=0?'grn':'red')}">${diff==null?'–':(diff>0?'+':'')+diff}</div>
+      <div class="sunit ${diff==null?'':(diff>=0?'':'red')}">${diff==null?'':unit}</div>
+    </div>
+  </div>
+  <div class="cprice"><div>零售 <strong>$${fmt(p.retail)}</strong></div><div style="color:var(--bdr)">｜</div><div>商用 <strong>$${fmt(p.commercial)}</strong></div></div>
+  <div class="upd">更新 ${p.upd||'–'}</div>
+</div>
+<div class="card-edit-col">
+  <button class="edit-btn-sm e" onclick="openSheet(${p.id})">✏️</button>
+  <button class="edit-btn-sm d" onclick="delProd(${p.id})">🗑</button>
+</div>
+</div>`;
+  }).join('');
+}
+
+/* ── 試算：庫存顯示單位，最小值邏輯不變 ── */
+function renderC(){
+  const cl=document.getElementById('clist'),cf=document.getElementById('cfooter');
+  const items=cart.map(id=>prods.find(p=>p.id===id)).filter(Boolean);
+  if(!items.length){cl.innerHTML='<div class="cempty"><div style="font-size:38px">🛒</div><div>尚未選取產品<br>請在庫存查詢中點 + 加入</div></div>';cf.innerHTML='';return;}
+  cl.innerHTML=items.map(p=>{
+    const th=p.photos&&p.photos[0]?`<img src="${p.photos[0]}" alt="">`:'📷';
+    const unit=u(p);
+    return`<div class="ccrd"><div class="cthumb">${th}</div>
+<div class="ccinfo">
+  <div class="ccname">${p.name}</div>
+  <div class="ccstk">本月庫存：<strong style="color:var(--rose)">${p.curStock??'–'}</strong> ${unit}</div>
+  <div class="ccprc">零售 $${fmt(p.retail)} ／ 商用 $${fmt(p.commercial)}</div>
+</div>
+<button class="rmbtn" onclick="removeCart(${p.id})">−</button></div>`;
+  }).join('');
+  const tr=items.reduce((s,p)=>s+(Number(p.retail)||0),0);
+  const tc2=items.reduce((s,p)=>s+(Number(p.commercial)||0),0);
+  const mn=Math.min(...items.map(p=>Number(p.curStock)||0));
+  // 收集各產品單位，若都相同就顯示，否則顯示「組」
+  const units=[...new Set(items.map(p=>u(p)))];
+  const unitLabel=units.length===1?units[0]:'組';
+  cf.innerHTML=`
+<div class="ctrow"><span class="ctlbl">零售總價</span><span class="ctval">$${fmt(tr)}</span></div>
+<div class="ctrow"><span class="ctlbl">商用總價</span><span class="ctval">$${fmt(tc2)}</span></div>
+<div class="minbox">
+  <div style="font-size:11px;color:var(--textm);font-weight:500;margin-bottom:3px">依最小庫存計算</div>
+  <div class="minrow"><span class="mintxt">最多可販售</span><span class="minnum">${mn}</span><span class="mintxt">${unitLabel}</span></div>
+</div>`;
+}
+
+/* ── 操作 ── */
+function doFilter(f,el){
+  filt=f;
+  document.querySelectorAll('.chip').forEach(c=>{
+    const cf=c.dataset.f,active=cf===f;
+    if(cf==='all'){c.style.background=active?'#1E1C18':'transparent';c.style.color=active?'#F5EFE8':'#1E1C18';c.style.borderColor=active?'#1E1C18':'rgba(60,56,48,0.3)';}
+    else{const vi=TKEYS.indexOf(cf),vn=vi>=0?TVARS[vi]:'brn';c.style.background=active?`var(--${vn})`:'transparent';c.style.color=active?'#fff':`var(--${vn})`;c.style.borderColor=active?`var(--${vn})`:`var(--${vn}-l)`;}
+  });
+  tab==='query'?renderQ():renderE();
+}
+function switchTab(t,idx){
+  tab=t;
+  document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  document.getElementById('qpage').style.display=t==='query'?'flex':'none';
+  document.getElementById('epage').style.display=t==='edit'?'flex':'none';
+  document.getElementById('cpage').classList.remove('open');
+  t==='query'?renderQ():renderE();
+}
+function toggleCart(id){cart=cart.includes(id)?cart.filter(x=>x!==id):[...cart,id];document.getElementById('badge').textContent=cart.length;renderQ();}
+function showCalc(){document.getElementById('qpage').style.display='none';document.getElementById('epage').style.display='none';document.getElementById('cpage').classList.add('open');renderC();}
+function hideCalc(){document.getElementById('cpage').classList.remove('open');switchTab(tab,tab==='query'?0:1);}
+function removeCart(id){cart=cart.filter(x=>x!==id);document.getElementById('badge').textContent=cart.length;renderC();}
+
+/* ── 照片 lightbox ── */
+function openPh(id){const p=prods.find(x=>x.id===id);if(!p)return;const ph=(p.photos||[]).filter(Boolean);if(!ph.length)return;phPhotos=ph;phIdx=0;buildSlider();document.getElementById('phOv').classList.add('open');}
+function buildSlider(){
+  document.getElementById('phTrack').innerHTML=phPhotos.map((src,i)=>`<div class="ph-slide"><img src="${src}" alt="照片${i+1}"></div>`).join('');
+  updateSlider();
+  const inn=document.getElementById('phInner');
+  inn.ontouchstart=e=>{phTouchX=e.touches[0].clientX};
+  inn.ontouchend=e=>{const dx=e.changedTouches[0].clientX-phTouchX;if(Math.abs(dx)>40)phGo(dx<0?1:-1)};
+}
+function updateSlider(){
+  document.getElementById('phTrack').style.transform=`translateX(${-phIdx*320}px)`;
+  document.getElementById('phDots').innerHTML=phPhotos.map((_,i)=>`<button class="ph-dot${i===phIdx?' on':''}" onclick="phGo(${i-phIdx})"></button>`).join('');
+  document.getElementById('phCounter').textContent=`${phIdx+1} / ${phPhotos.length}`;
+  document.getElementById('phPrev').disabled=phIdx===0;
+  document.getElementById('phNext').disabled=phIdx===phPhotos.length-1;
+}
+function phGo(d){phIdx=Math.max(0,Math.min(phPhotos.length-1,phIdx+d));updateSlider();}
+function closePh(){document.getElementById('phOv').classList.remove('open');}
+
+/* ── 編輯表單 ── */
+function openSheet(id){
+  eid=id;
+  const p=id?prods.find(x=>x.id===id):null;
+  sPhotos=p&&p.photos?[...p.photos]:[null,null];
+  document.getElementById('stitle').textContent=id?'編輯產品':'新增產品';
+  buildForm(p);
+  document.getElementById('shOv').classList.add('open');
+}
+function closeSheet(){document.getElementById('shOv').classList.remove('open');}
+
+function buildForm(p){
+  const selT=p?p.type:'';
+  const selUnit=p?u(p):'個';
+  const isCustom=selUnit&&!UNITS.includes(selUnit);
+  document.getElementById('sbody').innerHTML=`
+<div><div class="flbl">產品名稱 *</div><input class="finp" id="sf-n" value="${p?p.name:''}" placeholder="如：AA龍頭"></div>
+<div><div class="flbl">產品類型</div><div class="trow" id="trow">${TKEYS.map(t=>{const[bg,tc]=TC[t];const sel=t===selT;return`<div class="tchip" data-t="${t}" style="background:${sel?bg:'transparent'};color:${tc};border-color:${sel?tc:tc+'50'}" onclick="selType('${t}',this)">${t}</div>`;}).join('')}</div></div>
+<div>
+  <div class="flbl">產品照片（最多2張）</div>
+  <div class="puprow"><div id="pslot-0"></div><div id="pslot-1"></div></div>
+  <div style="font-size:10px;color:var(--texts);margin-top:6px">照片上傳至 Google Drive，命名如「AA龍頭_01.jpg」</div>
+</div>
+<div><div class="flbl">尺寸 <span style="font-weight:400;color:#AAA">（mm，非必填）</span></div>
+<div class="dim-row">
+  <div class="dim-item"><div class="dim-lbl">W <span class="dim-unit">寬</span></div><input class="dim-inp" id="sf-w" type="number" min="0" value="${p?p.sizeW||'':''}" placeholder="–"></div>
+  <div class="dim-item"><div class="dim-lbl">H <span class="dim-unit">高</span></div><input class="dim-inp" id="sf-h" type="number" min="0" value="${p?p.sizeH||'':''}" placeholder="–"></div>
+  <div class="dim-item"><div class="dim-lbl">D <span class="dim-unit">深</span></div><input class="dim-inp" id="sf-d" type="number" min="0" value="${p?p.sizeD||'':''}" placeholder="–"></div>
+</div></div>
+<div>
+  <div class="flbl">庫存單位</div>
+  <div class="unit-selector" id="unitRow">
+    ${UNITS.map(ut=>`<div class="uchip${ut===selUnit&&!isCustom?' sel':''}" onclick="selUnit('${ut}',this)">${ut}</div>`).join('')}
+    <input class="unit-custom" id="sf-unit-custom" placeholder="自訂" maxlength="4"
+      value="${isCustom?selUnit:''}"
+      oninput="onCustomUnit(this)"
+      onfocus="clearUchips()">
+  </div>
+</div>
+<div><div class="flbl">上月庫存 <span style="font-weight:400;color:#AAA">（自動帶入）</span></div><input class="finp" id="sf-ls" value="${p?p.lastStock??'':''}" disabled></div>
+<div><div class="flbl">本月庫存</div><input class="finp" id="sf-cs" type="number" min="0" value="${p?p.curStock??'':''}" placeholder="0"></div>
+<div class="frow2">
+  <div><div class="flbl">零售價</div><input class="finp" id="sf-rt" type="number" min="0" value="${p?p.retail??'':''}" placeholder="0"></div>
+  <div><div class="flbl">商用價</div><input class="finp" id="sf-cm" type="number" min="0" value="${p?p.commercial??'':''}" placeholder="0"></div>
+</div>
+<div><div class="flbl">特色文案（30字以內）</div><textarea class="finp" id="sf-cp" maxlength="30" placeholder="產品特色描述…">${p?p.copy||'':''}</textarea></div>`;
+  renderPhotoSlot(0);
+  renderPhotoSlot(1);
+}
+
+/* 單位選擇 */
+function selUnit(val,el){
+  document.querySelectorAll('#unitRow .uchip').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('sf-unit-custom').value='';
+}
+function clearUchips(){
+  document.querySelectorAll('#unitRow .uchip').forEach(c=>c.classList.remove('sel'));
+}
+function onCustomUnit(inp){
+  if(inp.value) document.querySelectorAll('#unitRow .uchip').forEach(c=>c.classList.remove('sel'));
+}
+function getSelectedUnit(){
+  const custom=document.getElementById('sf-unit-custom')?.value.trim();
+  if(custom)return custom;
+  const sel=document.querySelector('#unitRow .uchip.sel');
+  return sel?sel.textContent:'個';
+}
+
+function selType(t,el){
+  document.querySelectorAll('#trow .tchip').forEach(c=>{const[,tc2]=TC[c.dataset.t];c.style.background='transparent';c.style.borderColor=tc2+'50';});
+  const[bg,tc]=TC[t];el.style.background=bg;el.style.borderColor=tc;
+}
+
+/* ── 照片格渲染 ── */
+function renderPhotoSlot(i){
+  const slot=document.getElementById(`pslot-${i}`);if(!slot)return;
+  if(sPhotos[i]){
+    slot.innerHTML=`<div class="pbox-filled" onclick="document.getElementById('inp-replace-${i}').click()">
+      <img src="${sPhotos[i]}" alt="照片${i+1}">
+      <div class="pbox-replace"><span>點擊<br>換圖</span></div>
+    </div>`;
+  }else{
+    slot.innerHTML=`<div class="pbox-empty">
+      <div class="pbox-placeholder">📷</div>
+      <div class="pbox-btns">
+        <button class="pbox-btn camera" onclick="document.getElementById('inp-camera-${i}').click()">📷 拍照</button>
+        <button class="pbox-btn album"  onclick="document.getElementById('inp-album-${i}').click()">🖼 相簿</button>
+      </div>
+    </div>`;
+  }
+}
+function setSlotUploading(i){
+  const slot=document.getElementById(`pslot-${i}`);if(!slot)return;
+  slot.innerHTML=`<div class="pbox-uploading"><div class="upload-spinner"></div><div class="upload-lbl">上傳中…</div></div>`;
+}
+/* ── 照片壓縮工具 ── */
+function compressImage(dataUrl, maxPx=800, quality=0.7){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width, h=img.height;
+      if(w>maxPx||h>maxPx){
+        if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
+        else{w=Math.round(w*maxPx/h);h=maxPx;}
+      }
+      const canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src=dataUrl;
+  });
+}
+
+async function handlePhoto(i,inp){
+  const f=inp.files[0];if(!f)return;
+  inp.value='';
+  const name=document.getElementById('sf-n')?.value.trim()||'產品';
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    setSlotUploading(i);
+    try{
+      setSyncDot('busy');
+      showToast('壓縮照片中…');
+      const compressed=await compressImage(e.target.result, 400, 0.5);
+      showToast('上傳照片中…');
+      const res=await apiUploadPhoto(name, i, compressed);
+      if(res&&res.url){
+        sPhotos[i]=res.url;
+        setSyncDot('ok');
+        showToast(`✅ 照片${i+1} 已上傳`);
+      }else{
+        throw new Error((res&&res.error)||'上傳失敗');
+      }
+    }catch(err){
+      sPhotos[i]=e.target.result; // 暫存原圖預覽
+      setSyncDot('err');
+      showToast('⚠️ 上傳失敗：'+err.message);
+    }
+    renderPhotoSlot(i);
+  };
+  reader.readAsDataURL(f);
+}
+
+/* ── 儲存 ── */
+async function saveSheet(){
+  const n=document.getElementById('sf-n').value.trim();
+  if(!n){alert('請輸入產品名稱');return;}
+  const sel=document.querySelector('#trow .tchip[style*="background:var"]');
+  const t=sel?sel.dataset.t:'其他';
+  const unit=getSelectedUnit();
+  const btn=document.getElementById('ssave');
+  btn.disabled=true;btn.textContent='儲存中…';
+  const product={
+    id:eid||0,name:n,type:t,unit,
+    sizeW:document.getElementById('sf-w').value.trim(),
+    sizeH:document.getElementById('sf-h').value.trim(),
+    sizeD:document.getElementById('sf-d').value.trim(),
+    lastStock:eid?prods.find(p=>p.id===eid)?.lastStock||0:0,
+    curStock:parseInt(document.getElementById('sf-cs').value)||0,
+    retail:parseFloat(document.getElementById('sf-rt').value)||0,
+    commercial:parseFloat(document.getElementById('sf-cm').value)||0,
+    copy:document.getElementById('sf-cp').value,
+    photos:sPhotos
+  };
+  try{
+    setSyncDot('busy');
+    const res=await apiSaveProduct(product);
+    if(res.ok){
+      if(eid){const idx=prods.findIndex(p=>p.id===eid);if(idx>=0)prods[idx]={...prods[idx],...product,id:eid};}
+      else{product.id=res.id;prods.push(product);}
+      setSyncDot('ok');showToast('☁️ 已儲存');
+    }else throw new Error(res.error);
+  }catch(err){setSyncDot('err');showToast('⚠️ 儲存失敗：'+err.message);}
+  btn.disabled=false;btn.textContent='儲存';
+  closeSheet();renderQ();renderE();
+}
+
+async function delProd(id){
+  if(!confirm('確定刪除此產品？'))return;
+  try{
+    setSyncDot('busy');
+    const res=await apiDeleteProduct(id);
+    if(res.ok){prods=prods.filter(p=>p.id!==id);cart=cart.filter(x=>x!==id);document.getElementById('badge').textContent=cart.length;setSyncDot('ok');showToast('🗑 已刪除');}
+    else throw new Error(res.error);
+  }catch(err){setSyncDot('err');showToast('⚠️ 刪除失敗');}
+  renderE();renderQ();
+}
+
+/* ── 匯出（加入單位欄）── */
+function showExport(){
+  document.getElementById('expMonth').textContent=getYMLabel()+' 庫存資料';
+  document.getElementById('exptbody').innerHTML=prods.map(p=>`<tr><td>${p.name}</td><td>${p.curStock??'–'}</td><td>${u(p)}</td></tr>`).join('');
+  document.getElementById('expOv').classList.add('open');
+}
+function doCopy(){
+  const txt='產品名稱\t本月庫存\t單位\n'+prods.map(p=>`${p.name}\t${p.curStock??''}\t${u(p)}`).join('\n');
+  navigator.clipboard.writeText(txt).then(()=>alert('✅ 已複製！請貼入 Google 試算表'));
+}
+
+init();
+</script>
+</body>
+</html>
