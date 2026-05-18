@@ -10,12 +10,11 @@
 <style>
 html{width:100%;height:100%}
 *{box-sizing:border-box;margin:0;padding:0}
-/* 強制撐滿 Apps Script iframe */
 body{
   font-family:'PingFang TC','Microsoft JhengHei',sans-serif;
   background:var(--bg);color:var(--text);
-  min-width:100vw;min-height:100vh;
-  position:fixed;inset:0;overflow-y:auto;
+  min-height:100vh;
+  overflow-x:hidden;
 }
 :root{
   --sage:#6B9A7A;--sage-l:#C2D9C9;--sage-p:#EAF1EC;
@@ -573,7 +572,7 @@ function buildForm(p){
   const isCustom=selUnit&&!UNITS.includes(selUnit);
   document.getElementById('sbody').innerHTML=`
 <div><div class="flbl">產品名稱 *</div><input class="finp" id="sf-n" value="${p?p.name:''}" placeholder="如：AA龍頭"></div>
-<div><div class="flbl">產品類型</div><div class="trow" id="trow">${TKEYS.map(t=>{const[bg,tc]=TC[t];const sel=t===selT;return`<div class="tchip" data-t="${t}" style="background:${sel?bg:'transparent'};color:${tc};border-color:${sel?tc:tc+'50'}" onclick="selType('${t}',this)">${t}</div>`;}).join('')}</div></div>
+<div><div class="flbl">產品類型</div><div class="trow" id="trow">${TKEYS.map(t=>{const[bg,tc]=TC[t];const sel=t===selT;return`<div class="tchip" data-t="${t}" ${sel?'data-selected="1"':''} style="background:${sel?bg:'transparent'};color:${tc};border-color:${sel?tc:tc+'50'}" onclick="selType('${t}',this)">${t}</div>`;}).join('')}</div></div>
 <div>
   <div class="flbl">產品照片（最多2張）</div>
   <div class="puprow"><div id="pslot-0"></div><div id="pslot-1"></div></div>
@@ -626,8 +625,21 @@ function getSelectedUnit(){
 }
 
 function selType(t,el){
-  document.querySelectorAll('#trow .tchip').forEach(c=>{const[,tc2]=TC[c.dataset.t];c.style.background='transparent';c.style.borderColor=tc2+'50';});
-  const[bg,tc]=TC[t];el.style.background=bg;el.style.borderColor=tc;
+  document.querySelectorAll('#trow .tchip').forEach(c=>{
+    const[,tc2]=TC[c.dataset.t];
+    c.style.background='transparent';
+    c.style.borderColor=tc2+'50';
+    c.removeAttribute('data-selected');
+  });
+  const[bg,tc]=TC[t];
+  el.style.background=bg;
+  el.style.borderColor=tc;
+  el.setAttribute('data-selected','1');
+}
+
+function getSelectedType(){
+  const sel=document.querySelector('#trow .tchip[data-selected]');
+  return sel?sel.dataset.t:'其他';
 }
 
 /* ── 照片格渲染 ── */
@@ -652,23 +664,45 @@ function setSlotUploading(i){
   const slot=document.getElementById(`pslot-${i}`);if(!slot)return;
   slot.innerHTML=`<div class="pbox-uploading"><div class="upload-spinner"></div><div class="upload-lbl">上傳中…</div></div>`;
 }
-/* ── 照片壓縮工具 ── */
+
+/* ── 照片壓縮 ── */
 function compressImage(dataUrl, maxPx=800, quality=0.7){
   return new Promise(resolve=>{
     const img=new Image();
     img.onload=()=>{
-      let w=img.width, h=img.height;
+      let w=img.width,h=img.height;
       if(w>maxPx||h>maxPx){
         if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
         else{w=Math.round(w*maxPx/h);h=maxPx;}
       }
       const canvas=document.createElement('canvas');
-      canvas.width=w; canvas.height=h;
+      canvas.width=w;canvas.height=h;
       canvas.getContext('2d').drawImage(img,0,0,w,h);
-      resolve(canvas.toDataURL('image/jpeg', quality));
+      resolve(canvas.toDataURL('image/jpeg',quality));
     };
     img.src=dataUrl;
   });
+}
+
+/* ── 分段上傳 ── */
+async function uploadInChunks(name, photoIndex, dataUrl){
+  const match=dataUrl.match(/^data:(.+);base64,(.+)$/);
+  if(!match) throw new Error('無效圖片格式');
+  const mimeType=match[1];
+  const base64=match[2];
+  const CHUNK_SIZE=50000;
+  const totalChunks=Math.ceil(base64.length/CHUNK_SIZE);
+  const uploadId='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+  for(let i=0;i<totalChunks;i++){
+    const chunk=base64.slice(i*CHUNK_SIZE,(i+1)*CHUNK_SIZE);
+    const res=await apiCallPost({action:'uploadChunk',payload:JSON.stringify({uploadId,chunkIndex:i,totalChunks,chunk})});
+    if(!res.ok) throw new Error(`第${i+1}段失敗`);
+    showToast(`上傳中 ${i+1}/${totalChunks}…`);
+  }
+  showToast('處理中…');
+  const res=await apiCallPost({action:'finalizeUpload',payload:JSON.stringify({uploadId,totalChunks,productName:name,photoIndex,mimeType})});
+  if(!res.url) throw new Error(res.error||'組合失敗');
+  return res.url;
 }
 
 async function handlePhoto(i,inp){
@@ -681,20 +715,15 @@ async function handlePhoto(i,inp){
     try{
       setSyncDot('busy');
       showToast('壓縮照片中…');
-      const compressed=await compressImage(e.target.result, 400, 0.5);
-      showToast('上傳照片中…');
-      const res=await apiUploadPhoto(name, i, compressed);
-      if(res&&res.url){
-        sPhotos[i]=res.url;
-        setSyncDot('ok');
-        showToast(`✅ 照片${i+1} 已上傳`);
-      }else{
-        throw new Error((res&&res.error)||'上傳失敗');
-      }
+      const compressed=await compressImage(e.target.result,800,0.7);
+      const url=await uploadInChunks(name,i,compressed);
+      sPhotos[i]=url;
+      setSyncDot('ok');
+      showToast(`✅ 照片${i+1} 已上傳`);
     }catch(err){
-      sPhotos[i]=e.target.result; // 暫存原圖預覽
+      sPhotos[i]=e.target.result;
       setSyncDot('err');
-      showToast('⚠️ 上傳失敗：'+err.message);
+      showToast('⚠️ '+err.message);
     }
     renderPhotoSlot(i);
   };
@@ -705,8 +734,7 @@ async function handlePhoto(i,inp){
 async function saveSheet(){
   const n=document.getElementById('sf-n').value.trim();
   if(!n){alert('請輸入產品名稱');return;}
-  const sel=document.querySelector('#trow .tchip[style*="background:var"]');
-  const t=sel?sel.dataset.t:'其他';
+  const t=getSelectedType();
   const unit=getSelectedUnit();
   const btn=document.getElementById('ssave');
   btn.disabled=true;btn.textContent='儲存中…';
