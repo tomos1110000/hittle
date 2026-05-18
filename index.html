@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://script.google.com https://script.googleusercontent.com https://drive.google.com;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://script.google.com https://script.googleusercontent.com https://drive.google.com; img-src 'self' data: https://drive.google.com https://lh3.googleusercontent.com https://*.googleusercontent.com;">
 <title>庫存管理</title>
 <style>
 html{width:100%;height:100%}
@@ -697,13 +697,21 @@ async function uploadInChunks(name, photoIndex, dataUrl){
   const CHUNK_SIZE=3000;
   const totalChunks=Math.ceil(base64.length/CHUNK_SIZE);
   const uploadId='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+
+  showToast(`上傳中，共 ${totalChunks} 段…`);
+
+  // 並行上傳所有段
+  const promises=[];
   for(let i=0;i<totalChunks;i++){
     const chunk=base64.slice(i*CHUNK_SIZE,(i+1)*CHUNK_SIZE);
-    const res=await apiCallPost({action:'uploadChunk',payload:JSON.stringify({uploadId,chunkIndex:i,totalChunks,chunk})});
-    if(!res.ok) throw new Error(`第${i+1}段失敗`);
-    showToast(`上傳中 ${i+1}/${totalChunks}…`);
+    promises.push(
+      apiCallPost({action:'uploadChunk',payload:JSON.stringify({uploadId,chunkIndex:i,totalChunks,chunk})})
+        .then(res=>{ if(!res.ok) throw new Error(`第${i+1}段失敗`); return res; })
+    );
   }
-  showToast('處理中…');
+  await Promise.all(promises);
+
+  showToast('組合檔案中…');
   const res=await apiCallPost({action:'finalizeUpload',payload:JSON.stringify({uploadId,totalChunks,productName:name,photoIndex,mimeType})});
   if(!res.url) throw new Error(res.error||'組合失敗');
   return res.url;
