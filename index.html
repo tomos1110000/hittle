@@ -368,8 +368,12 @@ async function apiCall(params){
 
 async function apiCallPost(params){
   const u=new URL(API_URL);
-  // 把所有參數放進 URL（GET 方式模擬寫入，繞過 CORS preflight）
-  Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,String(v)));
+  // action 放進 URL
+  u.searchParams.set('action', params.action);
+  // payload 單獨 encode 後放進 URL
+  if(params.payload){
+    u.searchParams.set('payload', params.payload);
+  }
   const res=await fetch(u.toString(),{redirect:'follow'});
   return res.json();
 }
@@ -690,7 +694,7 @@ async function uploadInChunks(name, photoIndex, dataUrl){
   if(!match) throw new Error('無效圖片格式');
   const mimeType=match[1];
   const base64=match[2];
-  const CHUNK_SIZE=50000;
+  const CHUNK_SIZE=3000;
   const totalChunks=Math.ceil(base64.length/CHUNK_SIZE);
   const uploadId='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
   for(let i=0;i<totalChunks;i++){
