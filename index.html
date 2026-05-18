@@ -354,26 +354,47 @@ const TVARS=['slate','ochre','rose','mauve','steel','sprg','brn'];
 let prods=[],cart=[],filt='all',tab='query',eid=null,sPhotos=[null,null];
 let phPhotos=[],phIdx=0,phTouchX=0;
 
-/* ── API（google.script.run 方式，無 CORS 問題）── */
+/* ── API（JSONP 方式，適用 GitHub Pages）── */
+const API_URL='https://script.google.com/macros/s/AKfycbwP137CRyuky6Vc653J6lxUSw_uyPlobrJ2sn_Vs8kmpBcx-ArnE-A92ttgstyJqNE/exec';
+
 function setSyncDot(s){document.getElementById('syncDot').className='sync-dot '+s;}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
 
-function gsRun(fnName, ...args){
-  return new Promise((resolve, reject)=>{
-    let runner = google.script.run
-      .withSuccessHandler(result=>{
-        try{ resolve(JSON.parse(result)); }
-        catch(e){ resolve(result); }
-      })
-      .withFailureHandler(err=>reject(err));
-    runner[fnName](...args);
+function apiCall(params, timeout=15000){
+  return new Promise((resolve,reject)=>{
+    const cbName='_cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    const timer=setTimeout(()=>{
+      delete window[cbName];
+      document.getElementById('s_'+cbName)?.remove();
+      reject(new Error('請求逾時'));
+    }, timeout);
+    window[cbName]=function(data){
+      clearTimeout(timer);
+      delete window[cbName];
+      document.getElementById('s_'+cbName)?.remove();
+      resolve(data);
+    };
+    const u=new URL(API_URL);
+    Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,String(v)));
+    u.searchParams.set('callback',cbName);
+    const s=document.createElement('script');
+    s.id='s_'+cbName;
+    s.src=u.toString();
+    s.onerror=()=>{clearTimeout(timer);delete window[cbName];s.remove();reject(new Error('網路錯誤'));};
+    document.head.appendChild(s);
   });
 }
 
-async function apiGetProducts(){ return gsRun('clientGetProducts'); }
-async function apiSaveProduct(product){ return gsRun('clientSaveProduct', JSON.stringify(product)); }
-async function apiDeleteProduct(id){ return gsRun('clientDeleteProduct', id); }
-async function apiUploadPhoto(name, index, dataUrl){ return gsRun('clientUploadPhoto', name, index, dataUrl); }
+async function apiGetProducts(){return apiCall({action:'getProducts'});}
+async function apiSaveProduct(product){
+  // 照片不透過 JSONP 傳（太大），只傳文字資料
+  const p={...product, photos: product.photos||[null,null]};
+  return apiCall({action:'saveProduct', payload:JSON.stringify({product:p})});
+}
+async function apiDeleteProduct(id){return apiCall({action:'deleteProduct', payload:JSON.stringify({id})});}
+async function apiUploadPhoto(name,index,dataUrl){
+  return apiCall({action:'uploadPhoto', payload:JSON.stringify({name,index,dataUrl})}, 30000);
+}
 
 async function init(){
   setSyncDot('busy');
@@ -708,14 +729,30 @@ async function saveSheet(){
     retail:parseFloat(document.getElementById('sf-rt').value)||0,
     commercial:parseFloat(document.getElementById('sf-cm').value)||0,
     copy:document.getElementById('sf-cp').value,
-    photos:sPhotos
+    photos:sPhotos  // 已上傳的是 Drive URL，新上傳的是 base64 暫存
   };
   try{
     setSyncDot('busy');
     const res=await apiSaveProduct(product);
     if(res.ok){
-      if(eid){const idx=prods.findIndex(p=>p.id===eid);if(idx>=0)prods[idx]={...prods[idx],...product,id:eid};}
-      else{product.id=res.id;prods.push(product);}
+      const newId=res.id;
+      // 如果有 base64 暫存照片，現在才上傳到 Drive 並更新連結
+      for(let i=0;i<2;i++){
+        if(sPhotos[i]&&sPhotos[i].startsWith('data:')){
+          try{
+            const pr=await apiUploadPhoto(n,i,sPhotos[i]);
+            if(pr.url) sPhotos[i]=pr.url;
+          }catch(e){}
+        }
+      }
+      // 如有照片更新，再存一次
+      if(sPhotos.some(p=>p&&!p.startsWith('data:'))){
+        product.id=newId;
+        product.photos=sPhotos;
+        await apiSaveProduct(product);
+      }
+      if(eid){const idx=prods.findIndex(p=>p.id===eid);if(idx>=0)prods[idx]={...prods[idx],...product,id:eid,photos:sPhotos};}
+      else{product.id=newId;product.photos=sPhotos;prods.push(product);}
       setSyncDot('ok');showToast('☁️ 已儲存');
     }else throw new Error(res.error);
   }catch(err){setSyncDot('err');showToast('⚠️ 儲存失敗：'+err.message);}
